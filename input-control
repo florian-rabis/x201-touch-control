@@ -1,0 +1,163 @@
+#!/bin/bash
+
+device_touch="Wacom Serial Penabled 2FG Touchscreen Finger touch"
+device_pen="Wacom Serial Penabled 2FG Touchscreen Pen stylus"
+device_eraser="Wacom Serial Penabled 2FG Touchscreen Pen eraser"
+device_trackpoint="TPPS/2 IBM TrackPoint"
+
+screen=($(xrandr | grep "LVDS"))
+screen=${screen[0]}
+
+display=":0"
+
+#get current orientation
+current_rotation=($(xrandr | grep $screen))
+current_rotation=${current_rotation[4]}
+case $current_rotation in
+    "left")
+        current_rotation=1
+    ;;
+    "inverted")
+        current_rotation=2
+    ;;
+    "right")
+        current_rotation=3
+    ;;
+    *)
+        current_rotation=0
+    ;;
+esac
+
+function initialize {
+    for idfile in /sys/class/tty/ttyS*/device/id; do
+        if test -f $idfile; then
+            if grep -q '^WACf00c$' $idfile; then
+                devicefile=`echo "$idfile" | \
+                    sed -n \
+                    's/^\/sys\/class\/tty\/ttyS\([0-9]\+\)\/.*$/\/dev\/ttyS\1/p'`
+                if test -n $devicefile; then
+                    gksudo "inputattach --daemon -w8001 $devicefile"
+                    break
+                fi
+            fi
+        fi
+    done
+}
+
+function adjust_display {
+    xinput --map-to-output "$device_touch" $screen
+    xinput --set-prop "$device_touch" "Wacom Rotation" 0
+
+    xinput --map-to-output "$device_pen" $screen
+    xinput --set-prop "$device_pen" "Wacom Rotation" 0
+
+    xinput --map-to-output "$device_eraser" $screen
+    xinput --set-prop "$device_eraser" "Wacom Rotation" 0
+}
+
+# initialize
+
+case $1 in
+    "--init")
+        initialize
+    ;;
+    "--toggle")
+		enabled=($(xinput list-props "$device_trackpoint" | grep "Device Enabled"))
+		enabled=${enabled[$((${#enabled[*]} - 1))]}
+        if [ "$enabled" == "1" ]
+            then
+                xinput disable "$device_trackpoint"
+			else
+				xinput enable "$device_trackpoint"
+        fi
+    ;;
+	"-r"|"--rotation")
+        case $2 in
+            "prev")
+                if [ "$current_rotation" == "3" ]
+                    then
+                        rotation=0
+                    else
+                        rotation=$(($current_rotation + 1))
+                fi
+            ;;
+            "next")
+                if [ "$current_rotation" == "0" ]
+                    then
+                        rotation=3
+                    else
+                        rotation=$(($current_rotation - 1))
+                fi
+            ;;
+            "invert")
+                if [ "$current_rotation" -gt "1" ]
+                    then
+                        rotation=$(($current_rotation - 2))
+                    else
+                        rotation=$(($current_rotation + 2))
+                fi
+            ;;
+            *)
+        		rotation=$2
+            ;;
+        esac
+	;;
+	*)
+		echo "Gültige Werte: 0: normal, 1: links, 2: kopfüber, 3: rechts"
+		read -p "Geben Sie die gwünschte Bildschirmdrehung ein: " rotation
+	;;
+esac
+
+if [ "$rotation" != "" ]
+	then
+		case $rotation in
+			0)
+                xrandr --output "$screen" --rotate "normal" --display "$display"
+
+                adjust_display
+
+				xinput --set-prop "$device_pen" "Wacom Tablet Area" 100 200 26000 16400
+				xinput --set-prop "$device_eraser" "Wacom Tablet Area" 100 200 26000 16400
+
+				xinput enable "$device_trackpoint"
+			;;
+			1)
+                xrandr --output "$screen" --rotate "left" --display "$display"
+
+                adjust_display
+
+#				xinput --set-prop "$device_pen" "Wacom Tablet Area" 0 300 26200 16400
+#				xinput --set-prop "$device_eraser" "Wacom Tablet Area" 0 300 26200 16400
+				xinput disable "$device_trackpoint"
+			;;
+			2)
+                xrandr --output "$screen" --rotate "inverted" --display "$display"
+
+                adjust_display
+
+				xinput --set-prop "$device_pen" "Wacom Tablet Area" 100 200 26000 16400
+				xinput --set-prop "$device_eraser" "Wacom Tablet Area" 100 200 26000 16400
+
+				xinput disable "$device_trackpoint"
+			;;
+			3)
+                xrandr --output "$screen" --rotate "right" --display "$display"
+
+                adjust_display
+
+#				xinput --set-prop "$device_pen" "Wacom Tablet Area" 0 300 26200 16400
+#				xinput --set-prop "$device_eraser" "Wacom Tablet Area" 0 300 26200 16400
+				xinput disable "$device_trackpoint"
+			;;
+		esac
+fi
+# Standardwerte
+# 0 0 26312 16520
+
+#beim rotieren der Anzeige muss Tablet Area neu angepasst werden im dconf-editor da von cinnamon übergangen
+
+#laden der Kernel-Module
+#sudo modprobe -r wacom
+#sudo modprobe -r wacom_w8001
+#sudo modprobe wacom
+#sudo modprobe wacom_w8001
